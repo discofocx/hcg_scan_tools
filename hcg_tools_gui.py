@@ -1,7 +1,7 @@
 """ Linear sequence trans-coder,
     used mainly for generating animated GIFs from a camera rig """
 
-#imports
+# imports
 import os
 import sys
 import time
@@ -13,19 +13,20 @@ from transcode import transcode_ops as tr_ops
 
 
 __author__ = '__discofocx__'
-__copyright__ = 'Copyright 2017, HCG Technologies'
-__version__ = '0.1'
+__copyright__ = 'Copyright 2018, HCG Technologies'
+__version__ = '0.1.2'
 __email__ = 'gsorchin@gmail.com'
 __status__ = 'alpha'
 
 # Globals
-gDEBUG = True
+gDEBUG = False
 gWIDTH = 512
 
 if gDEBUG:
     icon = 'hcg.png'
 else:
-    icon = os.path.join(sys._MEIPASS,'hcg.png')
+    pass  # icon = os.path.join(sys._MEIPASS,'hcg.png') TODO Set icon remotely
+
 
 # --- Classes --- #
 
@@ -38,12 +39,14 @@ class AppWindow(QtGui.QDialog):
     def __init__(self):
         super(AppWindow, self).__init__()
         self.setFixedWidth(gWIDTH)
-        self.setWindowTitle('gTools 0.1')
-        self.setWindowIcon(QtGui.QIcon(icon))
+        self.setWindowTitle('gTools 0.1.2')
+        # self.setWindowIcon(QtGui.QIcon(icon))  # TODO Fix icon placement
 
         # Instance Attributes
         self.valid_sequence = False
         self.process_thread = None
+        self.seq_contents = None
+        self.last_known_path = os.getcwd()
 
         # Build GUI
         self.home()
@@ -205,13 +208,17 @@ class AppWindow(QtGui.QDialog):
         # Widget Behaviours
         fld_btn.clicked.connect(self.browse_for_sequence)
         self.dur_line.textChanged.connect(self.check_requirements)
+        self.rename_line.textChanged.connect(self.check_requirements)
         self.run_btn.clicked.connect(self.pre_process_sequence)
 
     def browse_for_sequence(self):
-        seq_path = QtGui.QFileDialog.getExistingDirectory(self, 'Select folder')
+
+        seq_path = QtGui.QFileDialog.getExistingDirectory(self,
+                                                          caption='Select folder',
+                                                          directory=self.last_known_path)
 
         try:
-            self.seq_contents = tr_ops.build_data_dict(seq_path)
+            self.seq_contents = tr_ops.build_data_list(seq_path)
         except ValueError as e:
             self.write_to_logger(e)
             self.valid_sequence = False
@@ -222,6 +229,7 @@ class AppWindow(QtGui.QDialog):
             self.valid_sequence = False
             self.check_requirements()
         else:
+            self.last_known_path = seq_path
             seq_path = format_full_path(seq_path)
             self.fld_line.setText(seq_path)
             self.write_to_logger('Found {0} images to process'.format(len(self.seq_contents)))
@@ -231,13 +239,10 @@ class AppWindow(QtGui.QDialog):
 
     def check_requirements(self):
 
-        if self.valid_sequence and self.dur_line.hasAcceptableInput():
+        if self.valid_sequence and self.dur_line.hasAcceptableInput() and self.rename_line.hasAcceptableInput():
             self.run_btn.setEnabled(True)
         else:
             self.run_btn.setEnabled(False)
-
-    #def _check_encoder(self):
-    #    if 'ffmpeg' in sys.path
 
     def write_to_logger(self, message):
 
@@ -267,7 +272,7 @@ class AppWindow(QtGui.QDialog):
         # Process call to the trans-code ops library
         self.process_thread = ProcessSequence(**sequence_manifest)
         self.connect(self.process_thread, QtCore.SIGNAL('finished_frame(QString)'), self.finished_frame)
-        self.connect(self.process_thread, QtCore.SIGNAL('finished()'), self.finished_sequence())
+        self.connect(self.process_thread, QtCore.SIGNAL('finished()'), self.finished_sequence)
         self.process_thread.start()
 
         # process_start = time.time()
@@ -391,5 +396,6 @@ def run():
     sys.exit(app.exec_())
 
 
-# --- Execution --- #
-run()
+# --- Entry Point --- #
+if __name__ == '__main__':
+    run()

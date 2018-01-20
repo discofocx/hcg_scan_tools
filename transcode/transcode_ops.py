@@ -2,18 +2,18 @@
     used mainly for generating animated GIFs from a camera rig """
 
 import os
-import re
-import time
-import datetime
+# import re
+# import time
+# import datetime
 import subprocess
-import logging
+# import logging
 
 import cv2
 import numpy as np
 
 __author__ = '__discofocx__'
-__copyright__ = 'Copyright 2017, HCG Technologies'
-__version__ = '0.1'
+__copyright__ = 'Copyright 2018, HCG Technologies'
+__version__ = '0.1.2'
 __email__ = 'gsorchin@gmail.com'
 __status__ = 'alpha'
 
@@ -24,7 +24,7 @@ gDECODER = 'ffmpeg'
 
 
 def is_image(l_file):
-    extensions = ['.jpg', '.jpeg']
+    extensions = ['.jpg', '.jpeg', '.png']
     for e in extensions:
         if e in l_file.lower():
             return True
@@ -33,19 +33,57 @@ def is_image(l_file):
     return False
 
 
-def build_data_dict(l_root):
+def image_sorter(image_path):
+    """
+    Due to the fact that images may have very different or inconsistent naming conventions, we try to enforce an image
+    sorter function, in this case we harvest the last-most whole number of the file name and use it as a key to sort
+    the images.
+    :param image_path:
+    :return: int, key for the built-in sort function
+    """
+    path, image = image_path
+
+    try:
+        sorting_number = image.split('.')[0].split('_')[-1]
+    except Exception as e:
+        print(e)
+    else:
+        return int(sorting_number)
+
+
+def build_data_list(l_root):
+    """
+    We build a tuple list containing all the desired images for the sequence.
+    (path, image)
+    :param l_root: str, The directory to search for images
+    :return: list, The tuple list
+    """
     if os.path.isdir(l_root):
+
         data = list()
+
+        '''
+        Instead of using os.walk now we are using os.listdir, so that we only get the files in the first level
+        of the given directory.
+        
         for path, subdir, files in os.walk(l_root):
             for file in files:
                 if is_image(file):
                     data.append((path, file))
                 else:
                     continue
-        if len(data) <= 1:
+        '''
+
+        for file in os.listdir(l_root):
+            if is_image(file):
+                data.append((os.path.abspath(l_root), file))
+            else:
+                continue
+
+        if not data:
             raise ValueError('Not enough files to generate a sequence')
         else:
-            data.sort() # Automatically try to sort images
+            data.sort(key=image_sorter)  # Automatically try to sort images
             return data
     else:
         raise NotADirectoryError('Please select a valid directory')
@@ -72,7 +110,6 @@ def set_sequence_settings(default=True):
 
 
 def process_sequence(**manifest):
-
     data_for_encode = None
 
     # Check for processing mode, if Boom, reverse and append
@@ -82,10 +119,10 @@ def process_sequence(**manifest):
     for index, data in enumerate(manifest['data']):
         # Unpack the data tuple and build a full system path
         path, file = data
-        file = os.path.join(path, file)
+        file_to_load = os.path.join(path, file)
 
         # Load the image into memory as a np array
-        im = imread_alpha(file)
+        im = imread_alpha(file_to_load)
 
         # Reshape image
         im = reshape_image(im, **manifest)
@@ -94,7 +131,7 @@ def process_sequence(**manifest):
         w_action, w_path = manifest['watermark']
 
         # Watermark parameters
-        w_size = 1/4  # TODO Find a way to expose this parameter
+        w_size = 1 / 4  # TODO Find a way to expose this parameter
         w_offset = (10, 10)  # TODO Offset, expose this parameter
         w_corner = 'BR'  # TODO Corner, expose this parameter
 
@@ -125,7 +162,7 @@ def process_sequence(**manifest):
             file = manifest['rename'] + numbering + '.jpg'
 
         # Create auto path
-        path = path + '\\auto'
+        path = path + '\\' + manifest['rename']
         if not os.path.isdir(path):
             os.mkdir(path)
 
@@ -137,16 +174,17 @@ def process_sequence(**manifest):
         if index == 0:
             data_for_encode = (path, file)
 
-        yield index, len(manifest['data'])  # We yield the index and the length to calculate progress
+        # We yield the index and the length to calculate progress
+        yield index, len(manifest['data'])
 
     if gDEBUG:
         cv2.destroyAllWindows()
 
     res = encode_file(data_for_encode, manifest['duration'])
+    print('Encoding result: {res}'.format(res=res))
 
 
 def encode_file(im_data, gif_length):
-
     im_dir, im_file = im_data
     palette_out = os.path.join(im_dir, 'palette.png')
 
@@ -171,21 +209,36 @@ def encode_file(im_data, gif_length):
     frame_sequence_in = os.path.join(im_dir, im_file)
     frame_sequence_in = frame_sequence_in.replace('_1001.jpg', '_%0{0}d.jpg'.format(padding))
 
-    # To where do we write our new encoded vid?
+    # To where do we write our new encoded gif?
     gif_out = os.path.join(im_dir, im_file.replace('_1001.jpg', '.gif'))
 
     # Start encoding operation, we will use FFMPEG under a python subprocess call
     print('Encoding...')
 
-    palette = subprocess.Popen('{0} -start_number 1001 -i {1} -vf palettegen {2}'.format(gDECODER, frame_sequence_in, palette_out), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    # palette = subprocess.Popen(
+    #     '{0} -start_number 1001 -i {1} -vf palettegen {2}'.format(gDECODER, frame_sequence_in, palette_out),
+    #     stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # , shell=True)
+
+    palette = subprocess.Popen([gDECODER, '-start_number', '1001', '-i', frame_sequence_in,
+                                '-vf', 'palettegen', palette_out], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     pout, perr = palette.communicate()
     pexit = palette.returncode
 
     if not pexit:
 
-        print('Succesfully generated a palette')
+        print('Successfully generated a palette')
 
-        ffmpeg = subprocess.Popen('{0} -start_number {1} -f image2 -r {2} -i {3} -i {4} -lavfi "paletteuse" -y {5}'.format(gDECODER, 1001, fps, frame_sequence_in, palette_out, gif_out), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        # ffmpeg = subprocess.Popen(
+        #     '{0} -start_number {1} -f image2 -r {2} -i {3} -i {4} -lavfi "paletteuse" -y {5}'.format(gDECODER, 1001,
+        #                                                                                              fps,
+        #                                                                                              frame_sequence_in,
+        #                                                                                              palette_out,
+        #                                                                                              gif_out),
+        #     stdout=subprocess.PIPE, stderr=subprocess.PIPE)  # , shell=True)
+
+        ffmpeg = subprocess.Popen([gDECODER, '-start_number', '1001', '-f', 'image2', '-r', str(fps),
+                                   '-i', frame_sequence_in, '-i', palette_out, '-lavfi', "paletteuse",
+                                   '-y', gif_out], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         out, err = ffmpeg.communicate()
         exit = ffmpeg.returncode
@@ -203,10 +256,12 @@ def encode_file(im_data, gif_length):
         else:
             print(err)
             return False
+    else:
+        print(perr)
+        return False
 
 
 def append_boom_frames(data):
-
     rwd_data = data[::-1]  # Reverse original data
     rwd_data = rwd_data[1:-1]  # Remove unnecessary frames
 
@@ -214,7 +269,6 @@ def append_boom_frames(data):
 
 
 def reshape_image(buffer, **data):
-
     # Unpack the parameters that we care about
     size = data['size'].rstrip(' SZ')
     crop = data['crop']
@@ -250,7 +304,6 @@ def reshape_image(buffer, **data):
 
 
 def apply_watermark(buffer, watermark):
-
     wm_size = 5
 
     w_mark = cv2.imread(watermark)
@@ -276,6 +329,7 @@ def convert_to_float(fraction):
 
     return float(num) / float(den)
 
+
 # --- Watermark Start --- #
 
 
@@ -286,8 +340,7 @@ def create_solid(size_x, size_y, color):
 
 
 def imread_alpha(path):
-
-    im =cv2.imread(path)  # The cv2.IMREAD_UNCHANGED flag flips the image to horizontal orientation
+    im = cv2.imread(path)  # The cv2.IMREAD_UNCHANGED flag flips the image to horizontal orientation
 
     try:
         (B, G, R, A) = cv2.split(im)
@@ -376,7 +429,6 @@ def key_shape(back, fore, boundaries):
     img2_fg = cv2.bitwise_and(fore, fore, mask=mask)
 
     return cv2.multiply(roi, img2_fg)
-
 
 # --- Watermark End --- #
 
